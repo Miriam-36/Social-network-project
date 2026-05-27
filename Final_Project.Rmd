@@ -65,6 +65,10 @@ V(g)$type <- startsWith(V(g)$name, "f_")
 # Check graph properties 
 is_bipartite(g) # TRUE
 
+# Project onto sex buyers (type = FALSE)
+g <- bipartite_projection(g, which = FALSE)
+
+
 # Check number of nodes and edges after extraction
 vcount(g) # Number of nodes 
 ecount(g) # Number of edges
@@ -418,14 +422,26 @@ Workflow: Run a simulation (Original SIR function) and random seeds to generate 
 
 Could include Date of posting, With/Without Condom (Anal and Oral), mouth kiss (depending on STI) but they are currently edge-level attributes but model is node-level features (need to aggregate if we want to use them).
 
+Predictive model
+
+1. Generate training data: 
+
 ```{r}
 # Baseline infection times
-seeds <- sample(1:vcount(g), vcount(g) * 0.01)
-realisation <- sim_sir(g, beta = 0.1, 
-                       mu = 0.1, seeds)
+seeds_train <- sample(1:vcount(g), vcount(g) * 0.01)
+realisation_train <- sim_sir(g, beta = 0.1, mu = 0.1, seeds_train)
+```
 
-# NEED TO ADD:  
+
+```{r}
 # 1. Feature Extraction 
+
+feat_degree    <- degree(g)             |> enframe(name = "inf", value = "degree")
+feat_closeness <- closeness(g)          |> enframe(name = "inf", value = "closeness")
+feat_between   <- betweenness(g)        |> enframe(name = "inf", value = "betweenness")
+feat_pagerank  <- page_rank(g)$vector   |> enframe(name = "inf", value = "page_rank")
+
+
 # 2. Merge into one table 
 
 # 3. Fit model 
