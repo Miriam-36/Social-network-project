@@ -1,0 +1,56 @@
+---
+title: "First_prep_code"
+format: html
+---
+
+### Network Setup
+
+```{r}
+# Load Network 
+read <- read.csv("network_data.csv", 
+                    sep = ";", 
+                 # Skip rows in csv beginning with "#"
+                    comment.char = "#", 
+                    header = FALSE)
+
+# Select relevant vars and tidy 
+network <- read |> 
+  # Add prefix to distinguish distinct nodes (bipartite)
+  mutate(female_node = paste0("f_", V1), 
+         male_node = paste0("m_", V2)) |> 
+  select(female_node, male_node) |> 
+  distinct() # Drop duplicate pairs
+
+# Create the graph 
+g <- graph_from_data_frame(network, directed = FALSE)
+g <- simplify(g)
+
+# Check if the network connected
+is_connected(g) # FALSE
+# Identify largest connected component (LCC)
+components_g <- components(g)
+# Create new graph extracting nodes in LCC
+g <- induced_subgraph(g, which(components_g$membership == which.max(components_g$csize)))
+
+# Assign node type as a vertex attribute
+# Escorts = TRUE, Buyers = FALSE (as per igraph bipartite convention <-- CHECK THIS)
+V(g)$type <- startsWith(V(g)$name, "f_")
+
+# Check graph properties 
+is_bipartite(g) # TRUE
+
+# Check number of nodes and edges after extraction
+vcount(g) # Number of nodes 
+ecount(g) # Number of edges
+
+# Other attributes
+# Separate degree distributions
+deg_escorts <- degree(g)[V(g)$type == TRUE]
+deg_buyers  <- degree(g)[V(g)$type == FALSE]
+data.frame(
+  type = c("Escorts", "Buyers"),
+  n = c(length(deg_escorts), length(deg_buyers)),
+  mean = c(mean(deg_escorts), mean(deg_buyers)),
+  median = c(median(deg_escorts), median(deg_buyers)),
+  sd = c(sd(deg_escorts), sd(deg_buyers)))
+```
