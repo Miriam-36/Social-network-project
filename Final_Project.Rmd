@@ -33,57 +33,25 @@ Rocha, L. E. C., Liljeros, F., Holme, P. (2011). Simulated Epidemics in an Empir
 
 ```{r}
 # Load Network 
-read <- read.csv("network_data.csv", 
-                    sep = ";", 
-                 # Skip rows in csv beginning with "#"
-                    comment.char = "#", 
-                    header = FALSE)
-
-# Select relevant vars and tidy 
-network <- read |> 
-  # Add prefix to distinguish distinct nodes (bipartite)
-  mutate(female_node = paste0("f_", V1), 
-         male_node = paste0("m_", V2)) |> 
-  select(female_node, male_node) |> 
-  distinct() # Drop duplicate pairs
-
+edgelist <- read.table("facebook_combined.txt")
 # Create the graph 
-g <- graph_from_data_frame(network, directed = FALSE)
+g <- graph_from_data_frame(edgelist, directed = FALSE)
 g <- simplify(g)
 
-# Check if the network connected
-is_connected(g) # FALSE
-# Identify largest connected component (LCC)
-components_g <- components(g)
-# Create new graph extracting nodes in LCC
-g <- induced_subgraph(g, which(components_g$membership == which.max(components_g$csize)))
-
-# Assign node type as a vertex attribute
-# Escorts = TRUE, Buyers = FALSE (as per igraph bipartite convention <-- CHECK THIS)
-V(g)$type <- startsWith(V(g)$name, "f_")
-
-# Check graph properties 
-is_bipartite(g) # TRUE
-
-# Project onto sex buyers (type = FALSE)
-g <- bipartite_projection(g, which = FALSE)
-
-
-# Check number of nodes and edges after extraction
+# Check number of nodes and edges
 vcount(g) # Number of nodes 
 ecount(g) # Number of edges
 
-# Other attributes
-# Separate degree distributions
-deg_escorts <- degree(g)[V(g)$type == TRUE]
-deg_buyers  <- degree(g)[V(g)$type == FALSE]
-data.frame(
-  type = c("Escorts", "Buyers"),
-  n = c(length(deg_escorts), length(deg_buyers)),
-  mean = c(mean(deg_escorts), mean(deg_buyers)),
-  median = c(median(deg_escorts), median(deg_buyers)),
-  sd = c(sd(deg_escorts), sd(deg_buyers)))
+# Check if the network connected
+is_connected(g) #TRUE
+
+deg <- degree(g, mode = "all")
+mean(deg)
+sd(deg)
+median(deg)
+
 ```
+
 
 **Network Attributes**
 
@@ -492,7 +460,7 @@ with the smallest PREDICTED infection time - i.e. predicted to spread fastest
 
 ```{r}
 seeds_model_s3 <- features |>
-  slice_min(pred_t, n = vcount(g) * 0.01) |>
+  slice_min(pred_t, n = round(vcount(g) * 0.01)) |>
   pull(inf) |> as.integer()
 ```
 
@@ -559,7 +527,7 @@ peak_random_s3 - peak_model_s3  # positive = model seeds peaked earlier
 ```{r}
 # Random seed vax (change to 5%)
 vax_model <- features |>
-  slice_min(pred_t, n = vcount(g) * 0.05) |>
+  slice_min(pred_t, n = round(vcount(g) * 0.05)) |>
   pull(inf) |> as.integer()
 
 ```
@@ -574,8 +542,8 @@ gp_model_vax <- delete_vertices(g, vax_model)
 ##### 14. Random seeds on reduced network
 
 ```{r}
-seeds_remaining <- sample(1:vcount(g_model_vax), vcount(g_model_vax) * 0.01)
-realization_model_s5 <- sim_sir(g_model_vax, beta = 0.05, mu = 0.1, seeds_remaining) |>
+seeds_remaining <- sample(1:vcount(gp_model_vax), vcount(gp_model_vax) * 0.01)
+realization_model_s5 <- sim_sir(gp_model_vax, beta = 0.05, mu = 0.1, seeds_remaining) |>
   # TODO: Replace beta = 0.05 with beta_high once Step 2 is complete
   group_by(t) |>
   summarize(ninf = n())
@@ -612,7 +580,6 @@ total_random_s5 <- sum(realization_random_s5$ninf)
 total_model_s5  <- sum(realization_model_s5$ninf)
 total_random_s5 - total_model_s5  # positive = model vaccination reduced more infections
 ```
-
 
 ```{r}
 # b) Difference in time of peak infection
