@@ -215,10 +215,10 @@ Currently - the β value only gets one realisation - would be more robust if ave
 results <- map_dfr(seq(0, 0.2, 0.01), 
         \(beta){seeds <- sample(1:vcount(g),
                                 vcount(g) * 0.01)
-        # make a realization for each beta
-        realization <- sim_sir(g, beta, mu, seeds) 
+        # make a realisation for each beta
+        realisation <- sim_sir(g, beta, mu, seeds) 
         # create dataframe row
-        data.frame(beta, ninf = nrow(realization)) 
+        data.frame(beta, ninf = nrow(realisation)) 
         })
 # Visualise
 results |> 
@@ -253,22 +253,22 @@ seeds_centrality <- closeness(g) |>
 
 # Simulations - Unchanged - CHANGE BETA VALUES
 # normal simulation
-realization_random <- sim_sir(g, beta = 0.1, mu = 0.1, 
+realisation_random <- sim_sir(g, beta = 0.1, mu = 0.1, 
                               seeds_random) |> 
   group_by(t) |> 
   summarize(ninf = n())
 # targeted simulation
-realization_targeted <- sim_sir(g, beta = 0.1, mu = 0.1,
+realisation_targeted <- sim_sir(g, beta = 0.1, mu = 0.1,
                                 seeds_centrality$inf) |>
   group_by(t) |> 
   summarize(ninf = n())
 
 # Plot infection curve - Unchanged
 ggplot() + 
-  geom_line(data = realization_random,
+  geom_line(data = realisation_random,
             aes(x = t, y = ninf,
                 col = "Random")) +
-  geom_line(data = realization_targeted,
+  geom_line(data = realisation_targeted,
             aes(x = t, y = ninf,
                 col = "Targeted"))
 
@@ -328,23 +328,23 @@ Workflow: Detect the exponential growth phase (using a visual inspection of the 
 # Code from Tut - Not Changed - Modify current code to the quarantine function and "Targeted" plot to be "Quarantine" 
 
 # normal simulation
-realization_random <- sim_sir(g, beta = 0.1, mu = 0.1, 
+realisation_random <- sim_sir(g, beta = 0.1, mu = 0.1, 
                               seeds_random) |> 
   group_by(t) |> 
   summarize(ninf = n())
 # targeted simulation
-realization_targeted <- sim_sir(g, beta = 0.1, mu=0.1,
+realisation_targeted <- sim_sir(g, beta = 0.1, mu=0.1,
                                 seeds_centrality$inf) |>
   group_by(t) |> 
   summarize(ninf = n())
 
-# USE realization_random results from Step 3 as the no-quarantine comparison 
+# USE realisation_random results from Step 3 as the no-quarantine comparison 
 # Plot infection curve - Unchanged
 ggplot() + 
-  geom_line(data = realization_random,
+  geom_line(data = realisation_random,
             aes(x = t, y = ninf,
                 col = "Random")) +
-  geom_line(data = realization_targeted,
+  geom_line(data = realisation_targeted,
             aes(x = t, y = ninf,
                 col = "Targeted"))
 
@@ -377,7 +377,7 @@ gp_random <- delete_vertices(g, vax_random)
 seeds <- sample(1:vcount(gp_random),
                 vcount(gp_random) * 0.01) 
 # simulation with random vaccination
-realization_random <- sim_sir(gp_random, 
+realisation_random <- sim_sir(gp_random, 
                               beta = 0.1, mu = 0.1, 
                               seeds) |>
   group_by(t) |> 
@@ -396,7 +396,7 @@ seeds <- sample(1:vcount(gp_centrality),
                 vcount(gp_centrality) * 0.01) 
 
 # simulation with centrality-based vaccination
-realization_targeted <- sim_sir(gp_centrality, 
+realisation_targeted <- sim_sir(gp_centrality, 
                                 beta = 0.5, mu = 0.1, 
                                 seeds) |>
   group_by(t) |> 
@@ -422,119 +422,202 @@ Workflow: Run a simulation (Original SIR function) and random seeds to generate 
 
 Could include Date of posting, With/Without Condom (Anal and Oral), mouth kiss (depending on STI) but they are currently edge-level attributes but model is node-level features (need to aggregate if we want to use them).
 
-Predictive model
+#### Part A: Build the Predictive model
 
-1. Generate training data: 
+##### 1. Generate training data: 
 
 ```{r}
 # Baseline infection times
+## TODO: Replace beta = 0.05 with beta_high once Step 2 is complete
 seeds_train <- sample(1:vcount(g), vcount(g) * 0.01)
-realisation_train <- sim_sir(g, beta = 0.1, mu = 0.1, seeds_train)
+realisation_train <- sim_sir(g, beta = 0.05, mu = 0.1, seeds_train)
 ```
 
+##### 2. Feature Extraction 
 
 ```{r}
-# 1. Feature Extraction 
-
 feat_degree    <- degree(g)             |> enframe(name = "inf", value = "degree")
 feat_closeness <- closeness(g)          |> enframe(name = "inf", value = "closeness")
 feat_between   <- betweenness(g)        |> enframe(name = "inf", value = "betweenness")
 feat_pagerank  <- page_rank(g)$vector   |> enframe(name = "inf", value = "page_rank")
-
-
-# 2. Merge into one table 
-
-# 3. Fit model 
-# model <- lm(t ~ ... , data = )
-
-# 4. Predict time to infection 
-# 5. Select smallest predicted infection time as seeds 
 ```
 
-#### Re-run Step 3
+##### 3. Merge into one table 
 
 ```{r}
-# Code from Tut - Not changed 
+## Convert inf to character so joins work correctly
+feat_degree$inf    <- as.character(feat_degree$inf)
+feat_closeness$inf <- as.character(feat_closeness$inf)
+feat_between$inf   <- as.character(feat_between$inf)
+feat_pagerank$inf  <- as.character(feat_pagerank$inf)
 
-# Seed Selection - Unchanged
+features <- feat_degree |>
+  left_join(feat_closeness, by = "inf") |>
+  left_join(feat_between,   by = "inf") |>
+  left_join(feat_pagerank,  by = "inf")
+```
+
+##### 4. Merge features with infection times
+
+```{r}
+## Nodes never reached by the simulation are dropped (they have no infection time)
+realisation_train$inf <- as.character(realisation_train$inf)
+training_data <- features |>
+  left_join(realisation_train, by = "inf") |>
+  filter(!is.na(t))
+```
+
+##### 5. Fit model 
+
+```{r}
+# model <- lm(t ~ ... , data = )
+## Predicts time-to-infection (t) from network structure features
+## A lower predicted t = spreads faster = better seed / more important to suppress
+model <- lm(t ~ degree + closeness + betweenness + page_rank, data = training_data)
+summary(model)  # Check which features are significant predictors
+```
+
+##### 6. Predict time to infection for ALL nodes 
+
+```{r}
+features$pred_t <- predict(model, newdata = features)
+```
+
+#### Part B: Re-run Step 3 
+
+Instead of picking seeds by centrality (Step 3), we pick the 1% of nodes
+with the smallest PREDICTED infection time - i.e. predicted to spread fastest
+
+##### 7. Select smallest predicted infection time as seeds 
+
+```{r}
+seeds_model_s3 <- features |>
+  slice_min(pred_t, n = vcount(g) * 0.01) |>
+  pull(inf) |> as.integer()
+```
+
+##### 8. Run random seed simulation 
+
+```{r}
 # Random spreaders
-seeds_random <- sample(1:vcount(g), 
+seeds_random_s3 <- sample(1:vcount(g), 
                        vcount(g) * 0.01) 
-# centrality-based spreaders
-seeds_centrality <- closeness(g) |> 
-  enframe(name = "inf", 
-          value = "closeness") |> 
-  slice_max(closeness, 
-            n = vcount(g) * 0.01) 
 
-# Simulations - Unchanged
-# normal simulation
-realization_random <- sim_sir(g, beta = 0.1, mu = 0.1, 
-                              seeds_random) |> 
+realisation_random_s3 <- sim_sir(g, beta = 0.05, mu = 0.1, 
+                              seeds_random_s3) |> 
+  # TODO: Replace beta = 0.05 with beta_high once Step 2 is complete
   group_by(t) |> 
   summarize(ninf = n())
+```
+
+##### 9. Run the model-based seed simulation
+
+```{r}
 # targeted simulation
-realization_targeted <- sim_sir(g, beta = 0.1, mu=0.1,
-                                seeds_centrality$inf) |>
+realisation_model_s3 <- sim_sir(g, beta = 0.05, mu = 0.1,
+                                seeds_model_s3) |>
+  # TODO: Replace beta = 0.05 with beta_high once Step 2 is complete
   group_by(t) |> 
   summarize(ninf = n())
+```
 
-# Plot infection curve - Unchanged
+##### 10. Plot comparison
+
+```{r}
+# Plot infection curve 
 ggplot() + 
-  geom_line(data = realization_random,
+  geom_line(data = realisation_random_s3,
             aes(x = t, y = ninf,
                 col = "Random")) +
-  geom_line(data = realization_targeted,
+  geom_line(data = realisation_model_s3,
             aes(x = t, y = ninf,
-                col = "Targeted"))
-
-# NEED TO ADD: Steps a and b 
-# a) Difference in total infected 
-
-# b) Difference in time of peak infection 
+                col = "Model-based")) +
+  labs(title = "Step 7: Model-based vs Random Seeds",
+       x = "Time", y = "New infections", col = "Strategy")
 ```
 
-#### Re-run Step 5
+##### 11. Measure differences 
 
 ```{r}
-# Code from Tut - Not Changed
-
-# Random seed vax (change to 5%)
-vax_random <- sample(1:vcount(g),
-                     vcount(g) * 0.2)
-# Random network without vaccinated
-gp_random <- delete_vertices(g, vax_random) 
-# random spreaders
-seeds <- sample(1:vcount(gp_random),
-                vcount(gp_random) * 0.01) 
-# simulation with random vaccination
-realization_random <- sim_sir(gp_random, 
-                              beta = 0.1, mu = 0.1, 
-                              seeds) |>
-  group_by(t) |> 
-  summarize(ninf = n())
-
-# Centrality-based seed vax (change to 5%)
-vax_centrality <- closeness(g) |> 
-  enframe(name = "inf", 
-          value ="closeness") |>
-  slice_max(closeness, 
-            n = vcount(g) * 0.2) 
-# Centrality network without vaccinated
-gp_centrality <- delete_vertices(g, vax_centrality$inf) 
-# randomn spreaders
-seeds <- sample(1:vcount(gp_centrality), 
-                vcount(gp_centrality) * 0.01) 
-
-# simulation with centrality-based vaccination
-realization_targeted <- sim_sir(gp_centrality, 
-                                beta = 0.5, mu = 0.1, 
-                                seeds) |>
-  group_by(t) |> 
-  summarize(ninf = n())
-
-# NEED TO ADD: Steps a and b 
-# a) Difference in total infected 
-
-# b) Difference in time of peak infection 
+# a) Difference in total infected
+total_random_s3 <- sum(realisation_random_s3$ninf)
+total_model_s3  <- sum(realisation_model_s3$ninf)
+total_model_s3 - total_random_s3  # positive = model seeds infected more people
 ```
+
+```{r}
+# b) Difference in time of peak infection 
+peak_random_s3 <- realisation_random_s3$t[which.max(realisation_random_s3$ninf)]
+peak_model_s3  <- realisation_model_s3$t[which.max(realisation_model_s3$ninf)]
+peak_random_s3 - peak_model_s3  # positive = model seeds peaked earlier
+```
+
+#### Part C: Re-run Step 5 with model-selected vaccination targe
+
+##### 12. Select model-based vaccination targets (5% smallest predicted t)
+
+```{r}
+# Random seed vax (change to 5%)
+vax_model <- features |>
+  slice_min(pred_t, n = vcount(g) * 0.05) |>
+  pull(inf) |> as.integer()
+
+```
+
+##### 13. Build reduced network with model-selected nodes removed
+
+```{r}
+# Random network without vaccinated
+gp_model_vax <- delete_vertices(g, vax_model)
+```
+
+##### 14. Random seeds on reduced network
+
+```{r}
+seeds_remaining <- sample(1:vcount(g_model_vax), vcount(g_model_vax) * 0.01)
+realization_model_s5 <- sim_sir(g_model_vax, beta = 0.05, mu = 0.1, seeds_remaining) |>
+  # TODO: Replace beta = 0.05 with beta_high once Step 2 is complete
+  group_by(t) |>
+  summarize(ninf = n())
+```
+
+##### 15. Random vaccination baseline
+
+```{r}
+vax_random_s5 <- sample(1:vcount(g), vcount(g) * 0.05)
+g_random_vax  <- delete_vertices(g, vax_random_s5)
+seeds_random_s5 <- sample(1:vcount(g_random_vax), vcount(g_random_vax) * 0.01)
+realization_random_s5 <- sim_sir(g_random_vax, beta = 0.05, mu = 0.1, seeds_random_s5) |>
+  # TODO: Replace beta = 0.05 with beta_high once Step 2 is complete
+  group_by(t) |>
+  summarize(ninf = n())
+```
+
+##### 16. Plot comparison
+
+```{r}
+ggplot() +
+  geom_line(data = realization_random_s5,
+            aes(x = t, y = ninf, col = "Random Vaccination")) +
+  geom_line(data = realization_model_s5,
+            aes(x = t, y = ninf, col = "Model-based Vaccination")) +
+  labs(title = "Step 7: Model-based vs Random Vaccination",
+       x = "Time", y = "New infections", col = "Strategy")
+```
+
+##### 17. Measure differences (same metrics as Step 3) 
+```{r}
+# a) Difference in total infected
+total_random_s5 <- sum(realization_random_s5$ninf)
+total_model_s5  <- sum(realization_model_s5$ninf)
+total_random_s5 - total_model_s5  # positive = model vaccination reduced more infections
+```
+
+
+```{r}
+# b) Difference in time of peak infection
+peak_random_s5 <- realization_random_s5$t[which.max(realization_random_s5$ninf)]
+peak_model_s5  <- realization_model_s5$t[which.max(realization_model_s5$ninf)]
+peak_model_s5 - peak_random_s5  # positive = model vaccination delayed the peak
+```
+
