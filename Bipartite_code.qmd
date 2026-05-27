@@ -1,0 +1,372 @@
+---
+title: "Bipartite_code"
+format: html
+---
+
+# Bipartite Option
+
+### Network Setup: Bipartite
+
+```{r}
+# Load Network - ORINGAL 
+read <- read.csv("network_data.csv", 
+                    sep = ";", 
+                 # Skip rows in csv beginning with "#"
+                    comment.char = "#", 
+                    header = FALSE)
+
+# Select relevant vars and tidy 
+network <- read |> 
+  # Add prefix to distinguish distinct nodes (bipartite)
+  mutate(female_node = paste0("f_", V1), 
+         male_node = paste0("m_", V2)) |> 
+  select(female_node, male_node) |> 
+  distinct() # Drop duplicate pairs
+
+# Create the graph 
+g_bi <- graph_from_data_frame(network, directed = FALSE)
+g_bi <- simplify(g_bi)
+
+# Check if the network connected
+is_connected(g_bi) # FALSE
+# Identify largest connected component (LCC)
+components_g <- components(g_bi)
+# Create new graph extracting nodes in LCC
+g_bi <- induced_subgraph(g_bi, which(components_g$membership == which.max(components_g$csize)))
+
+# Assign node type as a vertex attribute
+# Escorts = TRUE, Buyers = FALSE (as per igraph bipartite convention <-- CHECK THIS)
+V(g_bi)$type <- startsWith(V(g_bi)$name, "f_")
+
+# Check graph properties 
+is_bipartite(g_bi) # TRUE
+
+# Check number of nodes and edges after extraction
+vcount(g_bi) # Number of nodes 
+ecount(g_bi) # Number of edges
+
+# Other attributes
+# Separate degree distributions
+deg_escorts <- degree(g_bi)[V(g_bi)$type == TRUE]
+deg_buyers  <- degree(g_bi)[V(g_bi)$type == FALSE]
+data.frame(
+  type = c("Escorts", "Buyers"),
+  n = c(length(deg_escorts), length(deg_buyers)),
+  mean = c(mean(deg_escorts), mean(deg_buyers)),
+  median = c(median(deg_escorts), median(deg_buyers)),
+  sd = c(sd(deg_escorts), sd(deg_buyers)))
+```
+
+**Network Attributes**
+
+The network returns a total of 15,810 nodes and 38,540 links following the removal of duplicate links and extracting the largest connected component. The total number of nodes represented by escorts
+
+The mean degree (M = 4.88, 2dp), median (Mdn = 2) and standard deviation (sd = 10.71, 2dp) were checked, indicating evidence of a positively skewed degree distribution with high variability. Given that highly skewed networks imply a small fraction of nodes with disproportionately high degree, and the subsequent impact this has on epidemic thresholds, this skewness will be further explored in the following steps to ensure appropriate selection of βc relative to characteristics and contextual factors of this network.
+
+## Steps
+
+1.  Find the theoretical epidemic threshold βc for your network for the information to reach a significant number of nodes.
+
+2.  Assuming that randomly-selected 1% initial spreaders, simulate the SIR model for a range below and above that threshold and plot the number of infected people as a function of β.
+
+3.  Choose a β well-above above βc. Using centrality, communities or any other suitable metric, find a better set of 1% of seeds in the network so we get more infected people than the random case. Measure the difference of your choice with the random case as: a) The difference in the total number of infected people b)The difference in the time of the peak of infection (when most infections happen).
+
+4.  Using the same β, design a “quarantine strategy”: during the exponential growth phase of the system (typically \~t = 3 , but check) quarantine of the susceptible population. You can model quarantine by temporally removing these nodes. Release the quarantined nodes 8 time steps later, making them susceptible again. Measure the difference with respect to no quarantine.
+
+5.  Suppose now that you can convince 5% of people in the network not to spread that information at all.
+
+    1.  Choose those 5% randomly in the network. Simulate the SIR model above βc using 1% of the remaining nodes as seeds. Choose those seeds randomly.
+    2.  Choose those 5% according to their centrality. Simulate the SIR model above βc using 1% of the remaining nodes as seeds. Choose those seeds randomly.
+    3.  Measure the difference between both cases as you did in step 3.
+
+6.  Comment on the relationship between the findings in steps 3 and 5 using the same type of centrality for the 1% in step 3 and 5% in step 5.
+
+7.  Train a model that predicts that time to infection of a node using their degree, centrality, betweeness, page rank or any other predictors you see fit. Use that model to select the seed nodes as those with the smallest time to infection in step 3. Repeat step 5 with this knowledge.
+
+## Workflow
+
+0.  Define Original SIR function (original)
+1.  Find the theoretical epidemic threshold (mu, kavg, ksq and betac code)
+2.  Calculate for each realisation (β range below and above βc) the number of total infections using the epidemic threshold identified in step 1 (Use Original SIR model), and CHECK plot the average total infected vs β to visualise epidemic threshold.
+3.  Set random seed and centrality-based spreaders, run a normal simulation using the random seeds and a targeted simulation using centrality-based seeds (both with Original SIR calls), plot the infection curve and then calculate the difference in total infected and the difference the time of peak infection between the random and centrality-based seeds.
+4.  Detect the exponential growth phase (using a visual inspection of the infection curve from Step 3 to confirm \~*t* = 3) and modify the Original SIR function to create the Quarantine SIR function. Repeat Step 3 for the quarantine simulation (random seeds) identifying the total infected and time of peak infection and compare this the random seed results from Step 3 (compared as with quarantine vs. no-quarantine strategies). I think we will need to select and justify what % of the susceptible population becomes quarantined.
+5.  Create two reduced networks - one with 5% random nodes deleted, and one with 5% high-centrality nodes deleted. For both reduced networks, select 1% random seeds and run Original SIR. Again measure the difference in total infected and the difference in time of peak infection (from Step 3).
+6.  Discuss the results from Step 3 and Step 5. Didn't fully understand this step so asked Claude - response was: "The instruction is saying that whatever centrality metric you chose in step 3 to identify your best 1% seeds (e.g. closeness), you should use that same metric in step 5 to identify the 5% to vaccinate. You are asking whether the nodes that are best at spreading (step 3) are also the most important ones to suppress (step 5). Using different centrality metrics in each step would muddy that comparison."
+7.  Run a simulation (Original SIR function) and random seeds to generate baseline infection times. Extract node features (e.g., degree, centrality, betweenness, page rank, etc.) and merge with the baseline infection times (training data). Fit a model (logistic regression?) to predict the time to infection for every node (t) in the network. Repeat the code from Step 3, replacing the centrality-based (1%) seeds with the 1% of nodes with the smallest predicted time (t) and compare it to the random seed (normal simulation). Repeat the code from Step 5, replacing the centrality-based vax targets (5%) with the 5% of nodes that have the smallest predicted time (t) (essentially the nodes identified as spreading the infection earliest) and compare the random vs. model vaccination spread.
+
+## Steps
+
+### Step 0: SIR Function (original / no-quarantine)
+
+Workflow: Define Original SIR function (original)
+
+```{r}
+# 
+sim_sir <- function(g_bi, beta_fm, beta_mf, mu, seeds){
+  # beta_fm = transmission rate female -> male
+  # beta_mf = transmission rate male -> female
+  
+  # initial state of the simulation
+  state <- rep(0, vcount(g_bi)) 
+  state[seeds] <- 1 #infect the seeds
+  t <- 0
+  table <- data.frame(t = 0, inf = seeds, 
+                      # Track node type
+                      type = V(g_bi)$type[seeds])
+  
+  while(sum(state == 1) > 0){
+    t <- t + 1
+    
+    ## I -> R
+    infected <- which(state == 1) # infected nodes
+    # generate a random value for every infected, 
+    # if it's < mu, let the node recover.
+    state[infected] <- ifelse(runif(length(infected)) < mu, 2, 1)
+    
+    # S -> I
+    infected <- which(state == 1) # nodes still infected
+    susceptible <- which(state == 0) # susceptible nodes
+    
+    # Separate transmission by direction 
+    # female infected
+    infected_f <- infected[V(g_bi)$type[infected] == TRUE] 
+    # male infected 
+    infected_m <- infected[V(g_bi)$type[infected] == FALSE] 
+    
+    # Contatcs of females (will be males): beta_fm
+    contacts_from_f <- as.numeric(unlist(adjacent_vertices(g_bi,
+                                                           infected_f))) 
+    contacts_from_f <- contacts_from_f[contacts_from_f %in% susceptible]     # get those who are susceptible
+    new_from_f <- contacts_from_f[runif(length(contacts_from_f)) < beta_fm] # infect contacts
+    
+    # Contacts of males (will be females): beta_mf
+    contacts_from_m <- as.numeric(unlist(adjacent_vertices(g_bi,
+                                                           infected_m))) 
+    contacts_from_m <- contacts_from_m[contacts_from_m %in% susceptible]     # get those who are susceptible
+    new_from_m <- contacts_from_m[runif(length(contacts_from_m)) < beta_mf] # infect contacts 
+    
+    # remove repeated infections
+    new_infected <- unique(c(new_from_f, new_from_m)) 
+    
+    if(length(new_infected) > 0){
+      state[new_infected] <- 1
+      table <- rbind(table, 
+                     data.frame(t, inf = new_infected, 
+                                type = V(g_bi)$type[new_infected]))
+    }
+  }
+  table
+}
+```
+
+### Step 1: Epidemic Threshold
+
+Find the theoretical epidemic threshold βc for your network for the information to reach a significant number of nodes.
+
+Workflow: Find the theoretical epidemic threshold (mu, kavg, ksq and betac code).
+
+**Interpretation**
+
+βc ≈ 0.0043 is primarily driven by high-degree heterogeneity in female nodes, where a small number of highly connected females create a structural vulnerability that makes epidemic spread almost inevitable at any realistic transmission rate.
+
+```{r}
+
+# Code from Tut - Unipartite networks 
+mu <- 0.5
+kavg <- mean(degree(g_bi))
+ksq  <- mean(degree(g_bi)^2)
+betac <- mu*kavg/(ksq - kavg)
+betac
+
+# Bipartite beta 
+# Filter by prefix 
+female_nodes <- V(g_bi)[grepl("^f_", V(g_bi)$name)]
+male_nodes   <- V(g_bi)[grepl("^m_", V(g_bi)$name)]
+kavg_m <- mean(degree(g_bi, v = male_nodes))
+ksq_m <- mean(degree(g_bi, v = male_nodes)^2) 
+kavg_f <- mean(degree(g_bi, v = female_nodes))
+ksq_f <- mean(degree(g_bi, v = female_nodes)^2)
+betac_bi <- mu * sqrt((kavg_m * kavg_f) / ((ksq_m - kavg_m) * (ksq_f - kavg_f)))
+
+betac_bi  # if this is ~0.009, any real STI (β typically 0.1–0.5) 
+          # sits FAR above threshold → endemic infection expected
+
+# NEED TO ADD: Distribution - needed to justify β 
+library(moments)  # for skewness()
+
+# Degree distributions
+skewness(degree(g_bi, v = female_nodes))
+skewness(degree(g_bi, v = male_nodes))
+
+# Visual check
+par(mfrow = c(1,2))
+hist(degree(g_bi, v = female_nodes), breaks = 50, main = "Female degree", xlab = "Degree")
+hist(degree(g_bi, v = male_nodes), breaks = 50, main = "Male degree",  xlab = "Degree")
+
+# Log-log plot to check for power-law (scale-free signature)
+plot(density(degree(g_bi, v = female_nodes)), log = "xy", main = "Female degree (log-log)")
+plot(density(degree(g_bi, v = male_nodes)), log = "xy", main = "Male degree (log-log)")
+```
+
+### Step 2: Simulate SIR
+
+**Centrality-Based Seeds vs Random**
+
+Assuming that randomly-selected 1% initial spreaders, simulate the SIR model for a range below and above that threshold and plot the number of infected people as a function of β.
+
+Workflow: Calculate for each realisation (β range below and above βc) the number of total infections using the epidemic threshold identified in step 1 (Use Original SIR model), and CHECK plot the average total infected vs β to visualise epidemic threshold.
+
+Currently - the β value only gets one realisation - would be more robust if averaged over multiple runs
+
+```{r}
+# Code from Tut - Not changed 
+
+# calculate for each realisation the number of total infections, trying for different values of β and fixed μ. 
+
+# beta range
+results <- map_dfr(seq(0, 0.2, 0.01), 
+        \(beta){seeds <- sample(1:vcount(g_bi),
+                                vcount(g_bi) * 0.01)
+        # make a realization for each beta
+        realization <- sim_sir(g_bi, beta, mu, seeds) 
+        # create dataframe row
+        data.frame(beta, ninf = nrow(realization)) 
+        })
+# Visualise
+results |> 
+  ggplot(aes(x = beta, y = ninf)) + 
+  geom_point() +
+  geom_vline(xintercept = betac, 
+             linetype = 2)
+```
+
+### Step 3: Maximising Infection
+
+Choose a β well-above above βc. Using centrality, communities or any other suitable metric, find a better set of 1% of seeds in the network so we get more infected people than the random case. Measure the difference of your choice with the random case as:
+
+a)  The difference in the total number of infected people
+b)  The difference in the time of the peak of infection (when most infections happen).
+
+Workflow: Set random seed and centrality-based spreaders, run a normal simulation using the random seeds and a targeted simulation using centrality-based seeds (both with Original SIR calls), plot the infection curve and then calculate the difference in total infected and the difference the time of peak infection between the random and centrality-based seeds.
+
+```{r}
+# Code from Tut - Not changed 
+
+# Seed Selection - Unchanged
+# Random spreaders
+seeds_random <- sample(1:vcount(g_bi), 
+                       vcount(g_bi) * 0.01) 
+# centrality-based spreaders
+seeds_centrality <- closeness(g_bi) |> 
+  enframe(name = "inf", 
+          value = "closeness") |> 
+  slice_max(closeness, 
+            n = vcount(g_bi) * 0.01) 
+
+# Simulations - Unchanged - CHANGE BETA VALUES
+# normal simulation
+realization_random <- sim_sir(g_bi, beta = 0.1, mu = 0.1, 
+                              seeds_random) |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+# targeted simulation
+realization_targeted <- sim_sir(g_bi, beta = 0.1, mu = 0.1,
+                                seeds_centrality$inf) |>
+  group_by(t) |> 
+  summarize(ninf = n())
+
+# Plot infection curve - Unchanged
+ggplot() + 
+  geom_line(data = realization_random,
+            aes(x = t, y = ninf,
+                col = "Random")) +
+  geom_line(data = realization_targeted,
+            aes(x = t, y = ninf,
+                col = "Targeted"))
+
+# NEED TO ADD: Steps a and b 
+# a) Difference in total infected 
+
+# b) Difference in time of peak infection 
+
+```
+
+### Quarantine SIR Simulation
+
+Modification needs to:
+
+- Modify existing SIR function to temporarily remove the nodes (acting as a quarantine) that is a random sample of susceptible nodes at \~ t = 3 (check: based on exponential growth phase - Step 3) and then reintroduce those nodes 8 steps later (e.g., \~ t = 11).
+- I think we will need to select and justify what % of the susceptible population becomes quarantined.
+
+```{r}
+# Original SIR Code from Tut - Not changed 
+
+sim_sir <- function(g, beta, mu, seeds){
+  state <- rep(0, vcount(g_bi)) #initial state of the simulation
+  state[seeds] <- 1 #infect the seeds
+  t <- 0
+  table <- data.frame(t = 0, inf = seeds)
+  while(sum(state == 1) > 0){
+    t <- t + 1
+    ## I -> R
+    infected <- which(state == 1) # infected nodes
+    # generate a random value for every infected, if it's < mu, let the node recover.
+    state[infected] <- ifelse(runif(length(infected)) < mu, 2, 1)
+    
+    ## S -> I
+    infected <- which(state == 1) # nodes still infected
+    susceptible <- which(state == 0) # susceptible nodes
+    contacts <- as.numeric(unlist(adjacent_vertices(g_bi, infected))) # contacts of infected
+    contacts <- contacts[contacts %in% susceptible] # get those who are susceptible
+    new_infected <- contacts[runif(length(contacts)) < beta] # infect contacts
+    new_infected <- unique(new_infected) # remove repeated infections
+    if(length(new_infected) > 0){
+      state[new_infected] <- 1
+      table <- rbind(table, 
+                     data.frame(t, inf = new_infected))
+    }
+  }
+  table
+}
+```
+
+### Step 4: Quarantine Strategy
+
+Using the same β, design a “quarantine strategy”: during the exponential growth phase of the system (typically \~*t* = 3 , but check) quarantine of the susceptible population. You can model quarantine by temporally removing these nodes. Release the quarantined nodes 8 time steps later, making them susceptible again. Measure the difference with respect to no quarantine.
+
+Workflow: Detect the exponential growth phase (using a visual inspection of the infection curve from Step 3 to confirm \~*t* = 3) and modify the Original SIR function to create the Quarantine SIR function. Repeat Step 3 for the quarantine simulation (random seeds) identifying the total infected and time of peak infection and compare this the random seed results from Step 3 (compared as with-quarantine vs. no-quarantine strategies).
+
+INTERPRETATIONS
+
+Female degree skewness (8.82) is 63% higher than male (5.39), confirming that a small number of high-degree sex workers drive epidemic vulnerability. This means targeted immunisation of female nodes will substantially outperform random immunisation.
+
+```{r}
+# Code from Tut - Not Changed - Modify current code to the quarantine function and "Targeted" plot to be "Quarantine" 
+
+# normal simulation
+realization_random <- sim_sir(g_bi, beta = 0.1, mu = 0.1, 
+                              seeds_random) |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+# targeted simulation
+realization_targeted <- sim_sir(g_bi, beta = 0.1, mu=0.1,
+                                seeds_centrality$inf) |>
+  group_by(t) |> 
+  summarize(ninf = n())
+
+# USE realization_random results from Step 3 as the no-quarantine comparison 
+# Plot infection curve - Unchanged
+ggplot() + 
+  geom_line(data = realization_random,
+            aes(x = t, y = ninf,
+                col = "Random")) +
+  geom_line(data = realization_targeted,
+            aes(x = t, y = ninf,
+                col = "Targeted"))
+
+# NEED TO ADD: Steps a and b 
+# a) Difference in total infected 
+
+# b) Difference in time of peak infection 
+
+```
