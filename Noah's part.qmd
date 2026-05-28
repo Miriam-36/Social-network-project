@@ -1,0 +1,369 @@
+---
+title: "Noah's part final homework"
+format: html
+editor: visual
+---
+
+```{r, include=F}
+# Libraries 
+library(tidyverse)
+library(igraph)
+library(ggthemes)
+
+# Load Network 
+edgelist <- read.table("facebook_combined.txt")
+# Create the graph 
+g <- graph_from_data_frame(edgelist, directed = FALSE)
+g <- simplify(g)
+
+# Code from Tut - Not changed 
+sim_sir <- function(g, beta, mu, seeds){
+  state <- rep(0, vcount(g)) #initial state of the simulation
+  state[seeds] <- 1 #infect the seeds
+  t <- 0
+  table <- data.frame(t = 0, inf = seeds)
+  while(sum(state == 1) > 0){
+    t <- t + 1
+    ## I -> R
+    infected <- which(state == 1) # infected nodes
+    # generate a random value for every infected, if it's < mu, let the node recover.
+    state[infected] <- ifelse(runif(length(infected)) < mu, 2, 1)
+    
+    ## S -> I
+    infected <- which(state == 1) # nodes still infected
+    susceptible <- which(state == 0) # susceptible nodes
+    contacts <- as.numeric(unlist(adjacent_vertices(g, infected))) # contacts of infected
+    contacts <- contacts[contacts %in% susceptible] # get those who are susceptible
+    new_infected <- contacts[runif(length(contacts)) < beta] # infect contacts
+    new_infected <- unique(new_infected) # remove repeated infections
+    if(length(new_infected) > 0){
+      state[new_infected] <- 1
+      table <- rbind(table, 
+                     data.frame(t, inf = new_infected))
+    }
+  }
+  table
+}
+```
+
+Now let's see if we can maximize the infection. Let's compare a sample of 40 random nodes (1% of our network) to a selection of nodes chosen by centrality metrics. Specifically, we'll select nodes that are more central to the network, meaning that they are the closest to all the other nodes in the network on average. We'll calculate the degree of all nodes, meaning the amount of edges they have, and take the top 40 to act as our "super-spreaders". After that, we can the simulation with a β equal to 0.006, which is well above our epidemic threshold (βc).
+
+```{r}
+set.seed(2026)
+
+# Random spreaders
+seeds_random <- sample(1:vcount(g), 
+                       floor(vcount(g) *0.01)) # 40
+
+# centrality-based spreaders
+seeds_centrality <- degree(g) |> 
+  enframe(name = "inf", 
+          value = "degree") |>
+  mutate(inf = match(inf, V(g)$name)) |> 
+  slice_max(degree, 
+            n = 40) 
+
+# Random seeds simulation
+
+raw_random <- sim_sir(g, beta = 0.006, mu = 0.1, seeds_random)
+
+realisation_random <- raw_random |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+
+# Central seeds simulation
+
+raw_targeted <- sim_sir(g, beta = 0.006, mu = 0.1, 
+                        seeds_centrality$inf)
+
+realisation_targeted <- raw_targeted |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+
+
+# Infection curve
+ggplot() + 
+  geom_line(data = realisation_random,
+            aes(x = t, y = ninf,
+                col = "Random")) +
+  geom_line(data = realisation_targeted,
+            aes(x = t, y = ninf,
+                col = "Targeted")) +
+  theme_minimal()
+```
+
+We can see that the targeted simulation peaks faster than than the random simulation, but the results don't seem to be different enough. The calculation which can be found below shows that there was a difference of 164 total infected between the random (2106 infected) and the targeted simulation (2270 infected). The targeted simulation peaked at t = 3, while the random simulation had a lower and slower peak at t = 11.
+
+```{r}
+# a) Difference in total infected 
+total_random <- nrow(raw_random)
+total_targeted <- nrow(raw_targeted)
+diff_total <- total_targeted - total_random
+# b) Difference in time of peak infection 
+peak_random <- realisation_random$t[which.max(realisation_random$ninf)]
+peak_targeted <- realisation_targeted$t[which.max(realisation_targeted$ninf)]
+diff_peak <- peak_random - peak_targeted
+
+# Display results 
+data.frame(
+  Metric = c("Total Infected", "Peak Infection Time"),
+  Random = c(total_random, peak_random),
+  Targeted = c(total_targeted, peak_targeted),
+  Difference = c(diff_total, diff_peak)) |>
+  kable(caption = "Comparison of Random vs Targeted Seeding")
+```
+
+Yet, this result comes with a caveat. Given that this is a stochastic simulation, the result changes each time you do the simulation. For example, if we set any other seed, we can get a negative result.
+
+```{r}
+set.seed(123)
+
+# Random spreaders
+seeds_random <- sample(1:vcount(g), 
+                       floor(vcount(g) *0.01)) # 40
+
+# centrality-based spreaders
+seeds_centrality <- degree(g) |> 
+  enframe(name = "inf", 
+          value = "degree") |>
+  mutate(inf = match(inf, V(g)$name)) |> 
+  slice_max(degree, 
+            n = 40) 
+
+# Random seeds simulation
+
+raw_random <- sim_sir(g, beta = 0.006, mu = 0.1, seeds_random)
+
+realisation_random <- raw_random |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+
+# Central seeds simulation
+
+raw_targeted <- sim_sir(g, beta = 0.006, mu = 0.1, 
+                        seeds_centrality$inf)
+
+realisation_targeted <- raw_targeted |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+
+
+# Infection curve
+ggplot() + 
+  geom_line(data = realisation_random,
+            aes(x = t, y = ninf,
+                col = "Random")) +
+  geom_line(data = realisation_targeted,
+            aes(x = t, y = ninf,
+                col = "Targeted")) +
+  theme_minimal()
+```
+
+As we can see below, in these particular cases, we get 10 infections less in the targeted simulation, even though it peaked faster.
+
+```{r}
+# a) Difference in total infected 
+total_random <- nrow(raw_random)
+total_targeted <- nrow(raw_targeted)
+diff_total <- total_targeted - total_random
+# b) Difference in time of peak infection 
+peak_random <- realisation_random$t[which.max(realisation_random$ninf)]
+peak_targeted <- realisation_targeted$t[which.max(realisation_targeted$ninf)]
+diff_peak <- peak_random - peak_targeted
+
+# Display results 
+data.frame(
+  Metric = c("Total Infected", "Peak Infection Time"),
+  Random = c(total_random, peak_random),
+  Targeted = c(total_targeted, peak_targeted),
+  Difference = c(diff_total, diff_peak)) |>
+  kable(caption = "Comparison of Random vs Targeted Seeding")
+```
+
+Stochastic simulations should be averaged so that the results are not skewed because a specifically positive/negative simulation. However, when doing this, it doesn't change the result much. The random simulations have 161 more infected.
+
+```{r}
+set.seed(2026)
+
+# Seed selection - done once, outside the loop
+seeds_random <- sample(1:vcount(g), floor(vcount(g) * 0.01))
+
+seeds_centrality <- degree(g) |>
+  enframe(name = "inf", value = "degree") |>
+  mutate(inf = match(inf, V(g)$name)) |>
+  slice_max(degree, n = 40)
+
+# Run 20 simulations for each strategy
+n_sims <- 20
+
+results_random <- map_dfr(1:n_sims, ~
+  sim_sir(g, beta = 0.006, mu = 0.1, seeds_random) |>
+    group_by(t) |>
+    summarize(ninf = n()) |>
+    mutate(sim = .x)
+)
+
+results_targeted <- map_dfr(1:n_sims, ~
+  sim_sir(g, beta = 0.006, mu = 0.1, seeds_centrality$inf) |>
+    group_by(t) |>
+    summarize(ninf = n()) |>
+    mutate(sim = .x)
+)
+
+# Average across simulations
+avg_random <- results_random |>
+  group_by(t) |>
+  summarize(ninf = mean(ninf))
+
+avg_targeted <- results_targeted |>
+  group_by(t) |>
+  summarize(ninf = mean(ninf))
+
+# Plot
+ggplot() +
+  geom_line(data = avg_random,
+            aes(x = t, y = ninf, col = "Random")) +
+  geom_line(data = avg_targeted,
+            aes(x = t, y = ninf, col = "Targeted")) +
+  labs(title = "SIR Infection Curves: Random vs Targeted (avg of 20 runs)",
+       x = "Time", y = "New Infections", colour = "Seeding Strategy") +
+  theme_minimal()
+
+# a) Difference in total infected
+total_random <- sum(avg_random$ninf)
+total_targeted <- sum(avg_targeted$ninf)
+cat("Difference in total infected:", total_targeted - total_random, "\n")
+
+# b) Difference in peak time
+peak_random <- avg_random$t[which.max(avg_random$ninf)]
+peak_targeted <- avg_targeted$t[which.max(avg_targeted$ninf)]
+cat("Difference in peak time:", peak_random - peak_targeted, "steps\n")
+```
+
+There are two possible reasons for this: either it is the centrality metric, which needs to be changed, or it is the structure of the network itself. We will use communities instead to take the most central nodes of each community to maximize infection. We'll use the louvain algorithm, which inferes communities by how dense specific parts of the networks are.
+
+```{r}
+set.seed(2026)
+
+# Detect communities
+communities <- cluster_louvain(g)
+
+# Centrality for every node with data on which community it is in
+node_data <- enframe(closeness(g), name = "inf", value = "closeness") |>
+  mutate(inf = as.numeric(inf),
+         community = membership(communities))
+
+# Pick best 5 nodes per community, then top 40
+seeds_community <- node_data |>
+  group_by(community) |>
+  slice_max(closeness, n = 1) |>
+  ungroup() |>
+  slice_max(closeness, n = 40)
+
+
+realisation_random <- sim_sir(g, beta = 0.006, mu = 0.1, 
+                              seeds_random) |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+# community-central seeds simulation
+realisation_community <- sim_sir(g, beta = 0.006, mu = 0.1,
+                                as.numeric(seeds_community$inf)) |>
+  group_by(t) |> 
+  summarize(ninf = n())
+
+# Infection curve
+ggplot() + 
+  geom_line(data = realisation_random,
+            aes(x = t, y = ninf,
+                col = "Random")) +
+  geom_line(data = realisation_community,
+            aes(x = t, y = ninf,
+                col = "Targeted")) +
+  theme_minimal()
+```
+
+Still, targeted simulations are not significantly different to random simulations. When looking at a visualization of the network it becomes more clear why:
+
+![Facebook Network Visualization](facebook_network_viz.png)
+
+The components are very densely connected within themselves but not with each other. This means that when there is a random seeding, the seed will probably be highly connected, which explains why the difference with the targeted simulations isn't big and that it can even be that random seeds get more people infected.
+
+#5. 
+
+Now, let's suppose 5 % of nodes in the network don't to spread that information, e.g that they are immune to the disease. 5 % is in our case 201 nodes.
+
+```{r}
+n_immune <- floor(vcount(g) * 0.05) # 201
+```
+
+Let's randomly sample the immune nodes and do the same that we did before: sample 40 random nodes (1 % of the network) as seeds and select 40 high degree seeds to compare how both simulations compare to each if they were immune nodes in the network. Given what we said earlier, we'll do 20 simulations of each and then compare the average number of infections. 
+
+```{r}
+# --- Random immunization ---
+immune_random <- sample(1:vcount(g), n_immune)
+remaining_random <- setdiff(1:vcount(g), immune_random)
+seeds_immune_random <- sample(remaining_random, floor(length(remaining_random) * 0.01))
+
+# --- Centrality-based immunization ---
+immune_targeted <- degree(g) |>
+  enframe(name = "inf", value = "degree") |>
+  mutate(inf = match(inf, V(g)$name)) |>
+  slice_max(degree, n = n_immune)
+remaining_targeted <- setdiff(1:vcount(g), immune_targeted$inf)
+seeds_immune_targeted <- sample(remaining_targeted, floor(length(remaining_targeted) * 0.01))
+
+# --- Remove immunized nodes from graph ---
+g_random <- delete_vertices(g, immune_random)
+g_targeted <- delete_vertices(g, immune_targeted$inf)
+
+# --- Run 20 simulations for each ---
+n_sims <- 20
+
+results_immune_random <- map_dfr(1:n_sims, ~
+  sim_sir(g_random, beta = 0.006, mu = 0.1, 
+          match(seeds_immune_random, remaining_random)) |>
+    group_by(t) |>
+    summarize(ninf = n()) |>
+    mutate(sim = .x)
+)
+
+results_immune_targeted <- map_dfr(1:n_sims, ~
+  sim_sir(g_targeted, beta = 0.006, mu = 0.1,
+          match(seeds_immune_targeted, remaining_targeted)) |>
+    group_by(t) |>
+    summarize(ninf = n()) |>
+    mutate(sim = .x)
+)
+
+# --- Average across simulations ---
+avg_immune_random <- results_immune_random |>
+  group_by(t) |>
+  summarize(ninf = mean(ninf))
+
+avg_immune_targeted <- results_immune_targeted |>
+  group_by(t) |>
+  summarize(ninf = mean(ninf))
+
+# --- Plot ---
+ggplot() +
+  geom_line(data = avg_immune_random,
+            aes(x = t, y = ninf, col = "Random Immunization")) +
+  geom_line(data = avg_immune_targeted,
+            aes(x = t, y = ninf, col = "Targeted Immunization")) +
+  labs(title = "SIR Model: Random vs Targeted Immunization",
+       x = "Time", y = "New Infections", colour = "Immunization Strategy") +
+  theme_minimal()
+
+# --- a) Difference in total infected ---
+total_immune_random <- sum(avg_immune_random$ninf)
+total_immune_targeted <- sum(avg_immune_targeted$ninf)
+cat("Difference in total infected:", total_immune_random - total_immune_targeted, "\n")
+
+# --- b) Difference in peak time ---
+peak_immune_random <- avg_immune_random$t[which.max(avg_immune_random$ninf)]
+peak_immune_targeted <- avg_immune_targeted$t[which.max(avg_immune_targeted$ninf)]
+cat("Difference in peak time:", peak_immune_targeted - peak_immune_random, "steps\n")
+```
+
+
+Having used the same type of centrality in the simulations without the immune nodes and the simulations including the immune, we can see again that this only furthers the divide between random and targeted, in advantage for the randomized simulations. Why? Because degree centrality is a double-edged sword: the same hubs that make the best seeds are also the best nodes to immunize. When we use degree centrality to select the 5% immune nodes, we are removing the exact nodes that the disease relies on to spread across the network. These high-degree hubs act as bridges between the dense clusters visible in the network visualization, and without them the disease struggles to jump from one cluster to another. In contrast, random immunization leaves most hubs intact, allowing the epidemic to propagate freely. The network's structure simultaneously makes it hard to accelerate an epidemic with smart seeding (because it spreads everywhere anyway) and easy to stop one with smart immunization (because removing a few hubs disconnects the whole network).
