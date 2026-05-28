@@ -23,11 +23,13 @@ output:
 library(tidyverse)
 library(igraph)
 library(ggthemes)
+library(moments)
+library(knitr)
 ```
 
-**Network**: Sexual contact patterns between Brazilian escorts and sex buyers.
+**Network**: Social Circles in Ego Networks on Facebook.
 
-Rocha, L. E. C., Liljeros, F., Holme, P. (2011). Simulated Epidemics in an Empirical Spatiotemporal Network of 50,185 Sexual Contacts. *PLOS Computational Biology, 7*(3), Article e1001109. [https://doi.org/10.1371/journal.pcbi.1001109](#0)
+McAuley, J. & Leskovec, J. (2012). Learning to discover social circles in ego networks. *Advances in Neural Information Processing Systems, 25*, 539-547. <https://doi.org/10.48550/arXiv.1210.8182>
 
 ### Network Setup
 
@@ -49,56 +51,26 @@ deg <- degree(g, mode = "all")
 mean(deg)
 sd(deg)
 median(deg)
-
+# Check skew
+skewness(deg) 
 ```
 
+### Network Attributes
 
-**Network Attributes**
+The network returns a total of 4,039 nodes and 88,234 links. The total number of nodes represent individual Facebook profiles and the edges are an undirected representation of Facebook friendship connections between profiles. The mean degree (M = 43.69, 2dp), median (Mdn = 25) and standard deviation (sd = 52.42, 2dp) indicated a positively skewed degree distribution with high variability.
 
-The network returns a total of 15,810 nodes and 38,540 links following the removal of duplicate links and extracting the largest connected component. The total number of nodes represented by escorts
+A skewness coefficient of 4.52 (2dp) confirmed the positive skew and is consistent with the presence of highly concentrated degrees typical of social networks. To acknowledge this, the epidemic threshold is computed using the heterogeneous mean-field formula β_c = μ⟨k⟩/(⟨k²⟩ − ⟨k⟩), which accounts for degree variance. Furthermore, the evidence of the skew further motivates the use of degree-based centrality for targeted seeding and immunisation strategies in subsequent analyses, where highly central nodes are expected to play a disproportionate role in spreading dynamics.
 
-The mean degree (M = 4.88, 2dp), median (Mdn = 2) and standard deviation (sd = 10.71, 2dp) were checked, indicating evidence of a positively skewed degree distribution with high variability. Given that highly skewed networks imply a small fraction of nodes with disproportionately high degree, and the subsequent impact this has on epidemic thresholds, this skewness will be further explored in the following steps to ensure appropriate selection of βc relative to characteristics and contextual factors of this network.
+### Interpreting the Network 
 
-## Steps
-
-1.  Find the theoretical epidemic threshold βc for your network for the information to reach a significant number of nodes.
-
-2.  Assuming that randomly-selected 1% initial spreaders, simulate the SIR model for a range below and above that threshold and plot the number of infected people as a function of β.
-
-3.  Choose a β well-above above βc. Using centrality, communities or any other suitable metric, find a better set of 1% of seeds in the network so we get more infected people than the random case. Measure the difference of your choice with the random case as: a) The difference in the total number of infected people b)The difference in the time of the peak of infection (when most infections happen).
-
-4.  Using the same β, design a “quarantine strategy”: during the exponential growth phase of the system (typically \~t = 3 , but check) quarantine of the susceptible population. You can model quarantine by temporally removing these nodes. Release the quarantined nodes 8 time steps later, making them susceptible again. Measure the difference with respect to no quarantine.
-
-5.  Suppose now that you can convince 5% of people in the network not to spread that information at all.
-
-    1.  Choose those 5% randomly in the network. Simulate the SIR model above βc using 1% of the remaining nodes as seeds. Choose those seeds randomly.
-    2.  Choose those 5% according to their centrality. Simulate the SIR model above βc using 1% of the remaining nodes as seeds. Choose those seeds randomly.
-    3.  Measure the difference between both cases as you did in step 3.
-
-6.  Comment on the relationship between the findings in steps 3 and 5 using the same type of centrality for the 1% in step 3 and 5% in step 5.
-
-7.  Train a model that predicts that time to infection of a node using their degree, centrality, betweeness, page rank or any other predictors you see fit. Use that model to select the seed nodes as those with the smallest time to infection in step 3. Repeat step 5 with this knowledge.
-
-## Workflow
-
-0.  Define Original SIR function (original)
-1.  Find the theoretical epidemic threshold (mu, kavg, ksq and betac code)
-2.  Calculate for each realisation (β range below and above βc) the number of total infections using the epidemic threshold identified in step 1 (Use Original SIR model), and CHECK plot the average total infected vs β to visualise epidemic threshold.
-3.  Set random seed and centrality-based spreaders, run a normal simulation using the random seeds and a targeted simulation using centrality-based seeds (both with Original SIR calls), plot the infection curve and then calculate the difference in total infected and the difference the time of peak infection between the random and centrality-based seeds.
-4.  Detect the exponential growth phase (using a visual inspection of the infection curve from Step 3 to confirm \~*t* = 3) and modify the Original SIR function to create the Quarantine SIR function. Repeat Step 3 for the quarantine simulation (random seeds) identifying the total infected and time of peak infection and compare this the random seed results from Step 3 (compared as with quarantine vs. no-quarantine strategies). I think we will need to select and justify what % of the susceptible population becomes quarantined.
-5.  Create two reduced networks - one with 5% random nodes deleted, and one with 5% high-centrality nodes deleted. For both reduced networks, select 1% random seeds and run Original SIR. Again measure the difference in total infected and the difference in time of peak infection (from Step 3).
-6.  Discuss the results from Step 3 and Step 5. Didn't fully understand this step so asked Claude - response was: "The instruction is saying that whatever centrality metric you chose in step 3 to identify your best 1% seeds (e.g. closeness), you should use that same metric in step 5 to identify the 5% to vaccinate. You are asking whether the nodes that are best at spreading (step 3) are also the most important ones to suppress (step 5). Using different centrality metrics in each step would muddy that comparison."
-7.  Run a simulation (Original SIR function) and random seeds to generate baseline infection times. Extract node features (e.g., degree, centrality, betweenness, page rank, etc.) and merge with the baseline infection times (training data). Fit a model (logistic regression?) to predict the time to infection for every node (t) in the network. Repeat the code from Step 3, replacing the centrality-based (1%) seeds with the 1% of nodes with the smallest predicted time (t) and compare it to the random seed (normal simulation). Repeat the code from Step 5, replacing the centrality-based vax targets (5%) with the 5% of nodes that have the smallest predicted time (t) (essentially the nodes identified as spreading the infection earliest) and compare the random vs. model vaccination spread.
+The analysis for this task interprets misinformation spread as analogous to an infectious process. Specifically, susceptible (S) nodes represent individuals not yet exposed to the misinformation; infected (I) nodes represent active spreaders; and recovered (R) nodes represent individuals who have ceased spreading, via having acquired a form of digital literacy . Separately, immunisation strategies (Steps 4–5) are modelled as the deliberate removal of nodes, representing targeted interventions to prevent spread. Whilst this analogy simplifies the complexity of misinformation spread and dynamics, it provides an empirically grounded framework for the analyses of this task.
 
 ## Steps
 
 ### Step 0: SIR Function (original / no-quarantine)
 
-Workflow: Define Original SIR function (original)
-
 ```{r}
-# Code from Tut - Not changed 
-
+# Code from Tutorial - No change required
 sim_sir <- function(g, beta, mu, seeds){
   state <- rep(0, vcount(g)) #initial state of the simulation
   state[seeds] <- 1 #infect the seeds
@@ -130,70 +102,51 @@ sim_sir <- function(g, beta, mu, seeds){
 
 ### Step 1: Epidemic Threshold
 
-Find the theoretical epidemic threshold βc for your network for the information to reach a significant number of nodes.
-
-Workflow: Find the theoretical epidemic threshold (mu, kavg, ksq and betac code).
-
-Note:
+Using the heterogeneous mean-field formula the epidemic threshold was calculated as βc = 0.00095 (5 dp). Misinformation spread on social media has been estimated with Twitter specific estimates of R0 = 4.0-5.1 under the SIR model (Cinelli et al., 2020). Using the relationship β = R0 · βc, a transmission rate of β = 0.00475 corresponds to R0 = 5, placed clearly above the threshold. A value of β = 0.006 was selected for subsequent analyses to ensure β was well above the threshold but remained theoretically relevant to the specifics of the network and a socially plausible transmission parameter for modelling misinformation spread.
 
 ```{r}
-# Code from Tut - Not changed 
+# Beta_c  
 mu <- 0.1
 kavg <- mean(degree(g))
 ksq  <- mean(degree(g)^2)
 betac <- mu*kavg/(ksq - kavg)
 betac
 
-# NEED TO ADD: Distribution - needed to justify β 
-# Visualise degree distribution
-degree_df <- data.frame(k = degree(g))
-
-# Linear scale (shows skew)
-ggplot(degree_df, aes(x = k)) +
-  geom_histogram(bins = 50) +
-  labs(title = "Degree Distribution", x = "Degree", y = "Count")
-
-# Log-log scale (reveals power-law / heavy tail structure)
-degree_count <- degree_df |>
-  count(k) |>
-  filter(k > 0)
-ggplot(degree_count, aes(x = log10(k), y = log10(n))) +
-  geom_point() +
-  labs(title = "Degree Distribution (log-log)",
-       x = "log10(Degree)", y = "log10(Count)")
-
+# above-threshold beta estimate 
+5 * betac
 ```
 
 ### Step 2: Simulate SIR
 
-**Centrality-Based Seeds vs Random**
-
 Assuming that randomly-selected 1% initial spreaders, simulate the SIR model for a range below and above that threshold and plot the number of infected people as a function of β.
 
-Workflow: Calculate for each realisation (β range below and above βc) the number of total infections using the epidemic threshold identified in step 1 (Use Original SIR model), and CHECK plot the average total infected vs β to visualise epidemic threshold.
-
-Currently - the β value only gets one realisation - would be more robust if averaged over multiple runs
+The plot below shows the total number of infected nodes as a function of transmission rate β, with the theoretical epidemic threshold βc = 0.00095 marked by the dashed vertical line. Below the threshold, infections remain negligible as the epidemic fails to activate throughout the network. Above the threshold, the number of infected nodes increases substantially with β, consistent with theoretical predictions of epidemic spread in heterogeneous networks. Currently, the variability observed across β values reflects the random disposition of the single realisation simulated per parameter value, where averaging over multiple realisations would produce a smoother transition and be more robust (not done due to being too computationally expensive). At the selected above-threshold value of β = 0.006, approximately 1953 nodes were infected, representing 48.4% of the network.
 
 ```{r}
-# Code from Tut - Not changed 
-
 # calculate for each realisation the number of total infections, trying for different values of β and fixed μ. 
-
+set.seed(246)
 # beta range
-results <- map_dfr(seq(0, 0.2, 0.01), 
+results <- map_dfr(seq(0, 0.006, 0.0001),
         \(beta){seeds <- sample(1:vcount(g),
                                 vcount(g) * 0.01)
         # make a realisation for each beta
         realisation <- sim_sir(g, beta, mu, seeds) 
         # create dataframe row
         data.frame(beta, ninf = nrow(realisation)) 
-        })
+          })
 # Visualise
 results |> 
   ggplot(aes(x = beta, y = ninf)) + 
   geom_point() +
   geom_vline(xintercept = betac, 
              linetype = 2)
+
+
+# Number of infected nodes at the 0.006 above-threshold 
+results_above <- results |> filter(beta == 0.006)
+cat("Nodes infected:", results_above$ninf, 
+    "\nPercentage of network:", 
+    round(results_above$ninf / vcount(g) * 100, 1), "%")
 ```
 
 ### Step 3: Maximising Infection
@@ -203,31 +156,37 @@ Choose a β well-above above βc. Using centrality, communities or any other sui
 a)  The difference in the total number of infected people
 b)  The difference in the time of the peak of infection (when most infections happen).
 
-Workflow: Set random seed and centrality-based spreaders, run a normal simulation using the random seeds and a targeted simulation using centrality-based seeds (both with Original SIR calls), plot the infection curve and then calculate the difference in total infected and the difference the time of peak infection between the random and centrality-based seeds.
+Given the evidence of the skew identified in the initial network attribute analysis, the degree centrality was used to select the top 1% of seeds for targeted seeding, where high-degree nodes are expected to maximise immediate spread across the network. As shown in the plot below, the targeted seeding strategy produced a sharper, earlier epidemic peak compared to random seeding. The peak infection occurred at t = 3 for targeted seeding compared to t = 11 for random seeding (difference of 8 time steps), indicating that degree-based seeds accelerate the spread of misinformation. Total infected nodes were higher for the targeted seeding (targeted = 2,270; random = 2,106; difference = 164). At β = 0.006, both strategies produced large scale epidemics, infecting approximately 50% of the network, consistent with the above-threshold transmission rate selected.
+
+These findings support the theoretical expectation that seeding from nodes with high-degree centality is a more effective spreading strategy than random selection. The earlier peak for targeted seeding has particularly important practical implications in the context of misinformation, where high-degree spreaders saturate the network faster, leaving less time for corrective interventions before the epidemic (or in this case, misinformation spread) peaks.
 
 ```{r}
-# Code from Tut - Not changed 
-
+set.seed(2026)
 # Seed Selection - Unchanged
 # Random spreaders
 seeds_random <- sample(1:vcount(g), 
-                       vcount(g) * 0.01) 
-# centrality-based spreaders
-seeds_centrality <- closeness(g) |> 
-  enframe(name = "inf", 
-          value = "closeness") |> 
-  slice_max(closeness, 
-            n = vcount(g) * 0.01) 
+                       floor(vcount(g) * 0.01)) # round down to produce whole numbers 
 
-# Simulations - Unchanged - CHANGE BETA VALUES
+# centrality-based spreaders
+# Change to degree if too slow
+seeds_centrality <- degree(g) |> 
+  enframe(name = "inf", 
+          value = "degree") |> 
+  slice_max(degree, 
+            n = floor(vcount(g) * 0.01)) |>  # round down to produce whole numbers
+  mutate(inf = match(inf, V(g)$name)) # using match as node names start at 0 
+
+# Simulation - Raw output (to count total unique infected)
 # normal simulation
-realisation_random <- sim_sir(g, beta = 0.1, mu = 0.1, 
-                              seeds_random) |> 
+raw_random <- sim_sir(g, beta = 0.006, mu = 0.1, seeds_random)
+# targeted simulation
+raw_targeted <- sim_sir(g, beta = 0.006, mu = 0.1, seeds_centrality$inf)
+
+# Summarised by time (for plot and peak time)
+realisation_random <- raw_random |> 
   group_by(t) |> 
   summarize(ninf = n())
-# targeted simulation
-realisation_targeted <- sim_sir(g, beta = 0.1, mu = 0.1,
-                                seeds_centrality$inf) |>
+realisation_targeted <- raw_targeted |> 
   group_by(t) |> 
   summarize(ninf = n())
 
@@ -238,12 +197,28 @@ ggplot() +
                 col = "Random")) +
   geom_line(data = realisation_targeted,
             aes(x = t, y = ninf,
-                col = "Targeted"))
+                col = "Targeted")) + 
+  labs(title = "SIR Infection Curves: Random vs Targeted Seeding",
+       x = "Time", 
+       y = "Number Infected",
+       colour = "Seeding Strategy")
 
-# NEED TO ADD: Steps a and b 
 # a) Difference in total infected 
-
+total_random <- nrow(raw_random)
+total_targeted <- nrow(raw_targeted)
+diff_total <- total_targeted - total_random
 # b) Difference in time of peak infection 
+peak_random <- realisation_random$t[which.max(realisation_random$ninf)]
+peak_targeted <- realisation_targeted$t[which.max(realisation_targeted$ninf)]
+diff_peak <- peak_random - peak_targeted
+
+# Display results 
+data.frame(
+  Metric = c("Total Infected", "Peak Infection Time"),
+  Random = c(total_random, peak_random),
+  Targeted = c(total_targeted, peak_targeted),
+  Difference = c(diff_total, diff_peak)) |>
+  kable(caption = "Comparison of Random vs Targeted Seeding")
 
 ```
 
@@ -316,10 +291,16 @@ ggplot() +
             aes(x = t, y = ninf,
                 col = "Targeted"))
 
-# NEED TO ADD: Steps a and b 
-# a) Difference in total infected 
 
+# a) Difference in total infected 
+total_random <- sum(realisation_random$ninf)
+total_targeted <- sum(realisation_targeted$ninf)
+diff_total <- total_targeted - total_random
 # b) Difference in time of peak infection 
+peak_random <- realisation_random$t[which.max(realisation_random$ninf)]
+peak_targeted <- realisation_targeted$t[which.max(realisation_targeted$ninf)]
+diff_peak <- peak_random - peak_targeted
+
 
 ```
 
@@ -392,7 +373,7 @@ Could include Date of posting, With/Without Condom (Anal and Oral), mouth kiss (
 
 #### Part A: Build the Predictive model
 
-##### 1. Generate training data: 
+##### 1. Generate training data:
 
 ```{r}
 # Baseline infection times
@@ -401,7 +382,7 @@ seeds_train <- sample(1:vcount(g), vcount(g) * 0.01)
 realisation_train <- sim_sir(g, beta = 0.05, mu = 0.1, seeds_train)
 ```
 
-##### 2. Feature Extraction 
+##### 2. Feature Extraction
 
 ```{r}
 feat_degree    <- degree(g)             |> enframe(name = "inf", value = "degree")
@@ -410,7 +391,7 @@ feat_between   <- betweenness(g)        |> enframe(name = "inf", value = "betwee
 feat_pagerank  <- page_rank(g)$vector   |> enframe(name = "inf", value = "page_rank")
 ```
 
-##### 3. Merge into one table 
+##### 3. Merge into one table
 
 ```{r}
 ## Convert inf to character so joins work correctly
@@ -435,7 +416,7 @@ training_data <- features |>
   filter(!is.na(t))
 ```
 
-##### 5. Fit model 
+##### 5. Fit model
 
 ```{r}
 # model <- lm(t ~ ... , data = )
@@ -445,18 +426,17 @@ model <- lm(t ~ degree + closeness + betweenness + page_rank, data = training_da
 summary(model)  # Check which features are significant predictors
 ```
 
-##### 6. Predict time to infection for ALL nodes 
+##### 6. Predict time to infection for ALL nodes
 
 ```{r}
 features$pred_t <- predict(model, newdata = features)
 ```
 
-#### Part B: Re-run Step 3 
+#### Part B: Re-run Step 3
 
-Instead of picking seeds by centrality (Step 3), we pick the 1% of nodes
-with the smallest PREDICTED infection time - i.e. predicted to spread fastest
+Instead of picking seeds by centrality (Step 3), we pick the 1% of nodes with the smallest PREDICTED infection time - i.e. predicted to spread fastest
 
-##### 7. Select smallest predicted infection time as seeds 
+##### 7. Select smallest predicted infection time as seeds
 
 ```{r}
 seeds_model_s3 <- features |>
@@ -464,7 +444,7 @@ seeds_model_s3 <- features |>
   pull(inf) |> as.integer()
 ```
 
-##### 8. Run random seed simulation 
+##### 8. Run random seed simulation
 
 ```{r}
 # Random spreaders
@@ -504,7 +484,7 @@ ggplot() +
        x = "Time", y = "New infections", col = "Strategy")
 ```
 
-##### 11. Measure differences 
+##### 11. Measure differences
 
 ```{r}
 # a) Difference in total infected
@@ -573,7 +553,8 @@ ggplot() +
        x = "Time", y = "New infections", col = "Strategy")
 ```
 
-##### 17. Measure differences (same metrics as Step 3) 
+##### 17. Measure differences (same metrics as Step 3)
+
 ```{r}
 # a) Difference in total infected
 total_random_s5 <- sum(realization_random_s5$ninf)
@@ -588,3 +569,6 @@ peak_model_s5  <- realization_model_s5$t[which.max(realization_model_s5$ninf)]
 peak_model_s5 - peak_random_s5  # positive = model vaccination delayed the peak
 ```
 
+## References 
+
+Cinelli, M., Quattrociocchi, W., Galeazzi, A., Valensis, C. M., Brugnoli, E., Schmidt, A. L., Zola, P., Zollo, F. & Scala, A. (2020). The COVID-19 social media infodemic. *Scientific Reports*, *10*, Article 16598. <https://doi.org/10.1038/s41598-020-73510-5>
