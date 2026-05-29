@@ -14,29 +14,6 @@ output:
   number_sections: TRUE
 ---
 
-```{r, include=F}
-# Libraries 
-library(tidyverse)
-library(igraph)
-library(ggthemes)
-```
-
----
-title: "Social Network Analysis | UC3M"
-subtitle: "Final Project: Spreading on a Social Network"
-author: 
-      - Samantha Riordan   | 100572578 
-      - Miriam Lim-Leal    | 100453357
-      - Noah Emanuel-Fürup | 100564888
-date: "`r format(Sys.time(), '%d/%m/%Y')`"
-output: 
-  html_document: 
-  toc: TRUE
-  toc_float: TRUE
-  toc_depth: 3
-  number_sections: TRUE
----
-
 ## Objective: Study the problem of spreading on a social network
 
 ## Intro
@@ -88,6 +65,10 @@ A skewness coefficient of 4.52 (2dp) confirmed the positive skew and is consiste
 
 The analysis for this task interprets misinformation spread as analogous to an infectious process. Specifically, susceptible (S) nodes represent individuals not yet exposed to the misinformation; infected (I) nodes represent active spreaders; and recovered (R) nodes represent individuals who have ceased spreading, via having acquired a form of digital literacy . Separately, immunisation strategies (Steps 4–5) are modelled as the deliberate removal of nodes, representing targeted interventions to prevent spread. Whilst this analogy simplifies the complexity of misinformation spread and dynamics, it provides an empirically grounded framework for the analyses of this task.
 
+## Steps
+
+### Step 0: SIR Function (original / no-quarantine)
+
 ```{r}
 # Code from Tutorial - No change required
 sim_sir <- function(g, beta, mu, seeds){
@@ -119,6 +100,7 @@ sim_sir <- function(g, beta, mu, seeds){
 }
 ```
 
+### Step 1: Epidemic Threshold
 
 Using the heterogeneous mean-field formula the epidemic threshold was calculated as βc = 0.00095 (5 dp). Misinformation spread on social media has been estimated with Twitter specific estimates of R0 = 4.0-5.1 under the SIR model (Cinelli et al., 2020). Using the relationship β = R0 · βc, a transmission rate of β = 0.00475 corresponds to R0 = 5, placed clearly above the threshold. A value of β = 0.006 was selected for subsequent analyses to ensure β was well above the threshold but remained theoretically relevant to the specifics of the network and a socially plausible transmission parameter for modelling misinformation spread.
 
@@ -133,6 +115,8 @@ betac
 # above-threshold beta estimate 
 5 * betac
 ```
+
+### Step 2: Simulate SIR
 
 Assuming that randomly-selected 1% initial spreaders, simulate the SIR model for a range below and above that threshold and plot the number of infected people as a function of β.
 
@@ -165,7 +149,9 @@ cat("Nodes infected:", results_above$ninf,
     round(results_above$ninf / vcount(g) * 100, 1), "%")
 ```
 
-Now let's see if we can maximize the infection. Let's compare a sample of 40 random nodes (1% of our network) to a selection of nodes chosen by centrality metrics. Specifically, we'll select nodes that are more central to the network, meaning that they are the closest to all the other nodes in the network on average. We'll calculate the degree of all nodes, meaning the amount of edges they have, and take the top 40 to act as our "super-spreaders". After that, we can the simulation with a β equal to 0.006, which is well above our epidemic threshold (βc).
+### Step 3: Maximising Infection
+
+Now let's see if we can maximize the infection. Let's compare a sample of 40 random nodes (1% of our network) to a selection of nodes chosen by centrality metrics. Specifically, we will select nodes that are more central to the network, meaning that they are the closest to all the other nodes in the network on average. we will calculate the degree of all nodes, meaning the amount of edges they have, and take the top 40 to act as our "super-spreaders". After that, we can the simulation with a β equal to 0.006, which is well above our epidemic threshold (βc).
 
 ```{r}
 set.seed(2026)
@@ -359,7 +345,7 @@ peak_targeted <- avg_targeted$t[which.max(avg_targeted$ninf)]
 cat("Difference in peak time:", peak_random - peak_targeted, "steps\n")
 ```
 
-There are two possible reasons for this: either it is the centrality metric, which needs to be changed, or it is the structure of the network itself. We will use communities instead to take the most central nodes of each community to maximize infection. We'll use the louvain algorithm, which inferes communities by how dense specific parts of the networks are.
+There are two possible reasons for this: either it is the centrality metric, which needs to be changed, or it is the structure of the network itself. We will use communities instead to take the most central nodes of each community to maximize infection. We will use the louvain algorithm, which inferes communities by how dense specific parts of the networks are.
 
 ```{r}
 set.seed(2026)
@@ -407,7 +393,96 @@ Still, targeted simulations are not significantly different to random simulation
 
 The components are very densely connected within themselves but not with each other. This means that when there is a random seeding, the seed will probably be highly connected, which explains why the difference with the targeted simulations isn't big and that it can even be that random seeds get more people infected.
 
-#5. 
+### Step 4: Quarantine Strategy
+
+```{r}
+# Modified SIR function with quarantine
+sim_sir_quarantine <- function(g, beta, mu, seeds,
+                                quarantine_t = 3,
+                                quarantine_pct = 0.20,
+                                release_after = 8) {
+  state <- rep(0, vcount(g))
+  state[seeds] <- 1
+  t <- 0
+  quarantine_release <- list()
+  table <- data.frame(t = 0, inf = seeds)
+
+  while(sum(state == 1) > 0 || any(state == 3)) {
+    t <- t + 1
+
+    # Release quarantined nodes back to susceptible at the right time step
+    if (!is.null(quarantine_release[[as.character(t)]])) {
+      state[quarantine_release[[as.character(t)]]] <- 0
+    }
+
+    # At quarantine_t, randomly remove 20% of susceptible nodes
+    if (t == quarantine_t) {
+      susceptible <- which(state == 0)
+      n_q <- round(length(susceptible) * quarantine_pct)
+      quarantined <- sample(susceptible, n_q)
+      state[quarantined] <- 3  # state 3 = quarantined
+      quarantine_release[[as.character(t + release_after)]] <- quarantined
+    }
+
+    ## I -> R
+    infected <- which(state == 1)
+    state[infected] <- ifelse(runif(length(infected)) < mu, 2, 1)
+
+    ## S -> I (quarantined nodes cannot be infected)
+    infected <- which(state == 1)
+    susceptible <- which(state == 0)
+    contacts <- as.numeric(unlist(adjacent_vertices(g, infected)))
+    contacts <- contacts[contacts %in% susceptible]
+    new_infected <- contacts[runif(length(contacts)) < beta]
+    new_infected <- unique(new_infected)
+    if (length(new_infected) > 0) {
+      state[new_infected] <- 1
+      table <- rbind(table, data.frame(t, inf = new_infected))
+    }
+    if (sum(state == 1) == 0 && !any(as.numeric(names(quarantine_release)) > t)) {
+      break    
+    } 
+  }
+  table
+}
+
+# Run quarantine simulation using same seeds_random as Step 3
+realisation_quarantine <- sim_sir_quarantine(g, beta = 0.006, mu = 0.1,
+                                              seeds_random) |>
+  group_by(t) |>
+  summarize(ninf = n())
+```
+
+
+```{r}
+# Plot: no quarantine (reuse realisation_random from Step 3) vs quarantine
+ggplot() +
+  geom_line(data = realisation_random,
+            aes(x = t, y = ninf, col = "No Quarantine")) +
+  geom_line(data = realisation_quarantine,
+            aes(x = t, y = ninf, col = "Quarantine")) +
+  labs(title = "Step 4: Quarantine Strategy",
+       x = "Time", y = "New infections", col = "Strategy") +
+  theme_minimal()
+```
+
+The random 20% quarantine strategy shows no significant difference in total infections or peak time compared no-quarantine. This is because the facebook network made of tightly connected, closed groups of friends with very few links connecting one group to another. Once a rumor or virus gets inside a group, random internal quarantines will not stop it from spreading to everyone in that group.
+
+```{r}
+# a) Difference in total infected
+total_no_q <- sum(realisation_random$ninf)
+total_q    <- sum(realisation_quarantine$ninf)
+cat("Difference in total infected:", total_no_q - total_q, "\n")
+
+# b) Difference in peak time
+peak_no_q <- realisation_random$t[which.max(realisation_random$ninf)]
+peak_q    <- realisation_quarantine$t[which.max(realisation_quarantine$ninf)]
+cat("Difference in peak time:", peak_q - peak_no_q, "steps\n")
+```
+
+The results show almost no change, with only 3 fewer infections and a small 3-step delay in the peak time. This proves that randomly separating a few people inside a group does not stop the spreading. This is because the different friend groups are so isolated from one another, that what ever happens inside them barely affects the rest of the network.
+
+### Step 5:  Minimising Spread 
 
 Now, let's suppose 5 % of nodes in the network don't to spread that information, e.g that they are immune to the disease. 5 % is in our case 201 nodes.
 
@@ -415,7 +490,7 @@ Now, let's suppose 5 % of nodes in the network don't to spread that information,
 n_immune <- floor(vcount(g) * 0.05) # 201
 ```
 
-Let's randomly sample the immune nodes and do the same that we did before: sample 40 random nodes (1 % of the network) as seeds and select 40 high degree seeds to compare how both simulations compare to each if they were immune nodes in the network. Given what we said earlier, we'll do 20 simulations of each and then compare the average number of infections. 
+Let's randomly sample the immune nodes and do the same that we did before: sample 40 random nodes (1 % of the network) as seeds and select 40 high degree seeds to compare how both simulations compare to each if they were immune nodes in the network. Given what we said earlier, we will do 20 simulations of each and then compare the average number of infections. 
 
 ```{r}
 # --- Random immunization ---
@@ -483,6 +558,230 @@ peak_immune_random <- avg_immune_random$t[which.max(avg_immune_random$ninf)]
 peak_immune_targeted <- avg_immune_targeted$t[which.max(avg_immune_targeted$ninf)]
 cat("Difference in peak time:", peak_immune_targeted - peak_immune_random, "steps\n")
 ```
+
+### Step 6: Analysis
+
+1.  Comment on the relationship between the findings in steps 3 and 5 using the same type of centrality for the 1% in step 3 and 5% in step 5.
+
+Workflow: Discuss the results from Step 3 and Step 5. Didn't fully understand this step so asked Claude - response was: "The instruction is saying that whatever centrality metric you chose in step 3 to identify your best 1% seeds (e.g. closeness), you should use that same metric in step 5 to identify the 5% to vaccinate. You are asking whether the nodes that are best at spreading (step 3) are also the most important ones to suppress (step 5). Using different centrality metrics in each step would muddy that comparison."
+
+### Step 7: Predictive Model
+
+1.  Train a model that predicts that time to infection of a node using their degree, centrality, betweeness, page rank or any other predictors you see fit. Use that model to select the seed nodes as those with the smallest time to infection in step 3. Repeat step 5 with this knowledge.
+
+#### Part A: Build the Predictive model
+
+##### 1. Generate training data:
+
+```{r}
+
+set.seed(2026)
+
+# Baseline infection times
+seeds_train <- sample(1:vcount(g), vcount(g) * 0.01)
+realisation_train <- sim_sir(g, beta = 0.006, mu = 0.1, seeds_train)
+```
+
+##### 2. Feature Extraction
+
+```{r}
+feat_degree    <- degree(g)             |> enframe(name = "inf", value = "degree")
+feat_closeness <- closeness(g)          |> enframe(name = "inf", value = "closeness")
+feat_between   <- betweenness(g)        |> enframe(name = "inf", value = "betweenness")
+feat_pagerank  <- page_rank(g)$vector   |> enframe(name = "inf", value = "page_rank")
+```
+
+##### 3. Merge into one table
+
+```{r}
+## Convert inf to character so joins work correctly
+feat_degree$inf    <- as.character(feat_degree$inf)
+feat_closeness$inf <- as.character(feat_closeness$inf)
+feat_between$inf   <- as.character(feat_between$inf)
+feat_pagerank$inf  <- as.character(feat_pagerank$inf)
+
+features <- feat_degree |>
+  left_join(feat_closeness, by = "inf") |>
+  left_join(feat_between,   by = "inf") |>
+  left_join(feat_pagerank,  by = "inf")
+```
+
+##### 4. Merge features with infection times
+
+```{r}
+## Nodes never reached by the simulation are dropped (they have no infection time)
+realisation_train$inf <- as.character(realisation_train$inf)
+training_data <- features |>
+  left_join(realisation_train, by = "inf") |>
+  filter(!is.na(t))
+```
+
+##### 5. Fit model
+
+```{r}
+# model <- lm(t ~ ... , data = )
+## Predicts time-to-infection (t) from network structure features
+## A lower predicted t = spreads faster = better seed / more important to suppress
+model <- lm(t ~ degree + closeness + betweenness + page_rank, data = training_data)
+summary(model)  # Check which features are significant predictors
+```
+
+The model shows that degree, closeness, and page_rank are highly significant predictors of infection time, meaning that nodes with more connections, closer proximity to others, and a lower page rank tend to get infected earlier in the network.
+
+##### 6. Predict time to infection for ALL nodes
+
+```{r}
+features$pred_t <- predict(model, newdata = features)
+```
+
+#### Part B: Re-run Step 3
+
+Instead of picking seeds by centrality (Step 3), we pick the 1% of nodes with the smallest PREDICTED infection time - i.e. predicted to spread fastest
+
+##### 7. Select smallest predicted infection time as seeds
+
+```{r}
+seeds_model_s3 <- features |>
+  slice_min(pred_t, n = round(vcount(g) * 0.01)) |>
+  pull(inf) 
+seeds_model_s3_idx <- match(seeds_model_s3, V(g)$name)
+```
+
+##### 8. Run random seed simulation
+
+```{r}
+# Random spreaders
+seeds_random_s3 <- sample(1:vcount(g), 
+                       vcount(g) * 0.01) 
+
+realisation_random_s3 <- sim_sir(g, beta = 0.006, mu = 0.1, 
+                              seeds_random_s3) |> 
+  group_by(t) |> 
+  summarize(ninf = n())
+```
+
+##### 9. Run the model-based seed simulation
+
+```{r}
+# targeted simulation
+realisation_model_s3 <- sim_sir(g, beta = 0.006, mu = 0.1,
+                                seeds_model_s3_idx) |>
+  group_by(t) |> 
+  summarize(ninf = n())
+```
+
+##### 10. Plot comparison
+
+```{r}
+# Plot infection curve 
+ggplot() + 
+  geom_line(data = realisation_random_s3,
+            aes(x = t, y = ninf,
+                col = "Random")) +
+  geom_line(data = realisation_model_s3,
+            aes(x = t, y = ninf,
+                col = "Model-based")) +
+  labs(title = "Step 7: Model-based vs Random Seeds",
+       x = "Time", y = "New infections", col = "Strategy")
+```
+
+The model-based seeding strategy successfully increases the spreading speed causing the infection curve to peak earlier and faster, compared to the slower random seeding strategy.
+
+##### 11. Measure differences
+
+```{r}
+# a) Difference in total infected
+total_random_s3 <- sum(realisation_random_s3$ninf)
+total_model_s3  <- sum(realisation_model_s3$ninf)
+total_model_s3 - total_random_s3  # positive = model seeds infected more people
+```
+
+```{r}
+# b) Difference in time of peak infection 
+peak_random_s3 <- realisation_random_s3$t[which.max(realisation_random_s3$ninf)]
+peak_model_s3  <- realisation_model_s3$t[which.max(realisation_model_s3$ninf)]
+peak_random_s3 - peak_model_s3  # positive = model seeds peaked earlier
+```
+The difference in total infected is -203, meaning that the model based strategy caused 203 more total infections across the network compared to random seeding. Additionally it successfully accelerated the outbreak, reaching its peak 8 time steps earlier.
+
+#### Part C: Re-run Step 5 with model-selected vaccination targe
+
+##### 12. Select model-based vaccination targets (5% smallest predicted t)
+
+```{r}
+# Random seed vax (change to 5%)
+vax_model <- features |>
+  slice_min(pred_t, n = round(vcount(g) * 0.05)) |>
+  pull(inf)
+vax_model_idx <- match(vax_model, V(g)$name)
+
+```
+
+##### 13. Build reduced network with model-selected nodes removed
+
+```{r}
+# Random network without vaccinated
+gp_model_vax <- delete_vertices(g, vax_model_idx)
+```
+
+##### 14. Random seeds on reduced network
+
+```{r}
+remaining_nodes_m5 <- V(gp_model_vax)$name
+seeds_remaining_m5 <- sample(remaining_nodes_m5, floor(length(remaining_nodes_m5) * 0.01))
+seeds_remaining_m5_idx <- match(seeds_remaining_m5, V(gp_model_vax)$name)
+
+
+realization_model_s5 <- sim_sir(gp_model_vax, beta = 0.006, mu = 0.1, seeds_remaining_m5_idx) |>
+  group_by(t) |>
+  summarize(ninf = n())
+```
+
+##### 15. Random vaccination baseline
+
+```{r}
+vax_random_s5 <- sample(V(g)$name, vcount(g) * 0.05)
+g_random_vax  <- delete_vertices(g, match(vax_random_s5, V(g)$name))
+
+remaining_nodes_r5 <- V(g_random_vax)$name
+seeds_random_s5 <- sample(remaining_nodes_r5, floor(length(remaining_nodes_r5) * 0.01))
+seeds_random_s5_idx <- match(seeds_random_s5, V(g_random_vax)$name)
+
+realization_random_s5 <- sim_sir(g_random_vax, beta = 0.006, mu = 0.1, seeds_random_s5_idx) |>
+  group_by(t) |>
+  summarize(ninf = n())
+```
+
+##### 16. Plot comparison
+
+```{r}
+ggplot() +
+  geom_line(data = realization_random_s5,
+            aes(x = t, y = ninf, col = "Random Vaccination")) +
+  geom_line(data = realization_model_s5,
+            aes(x = t, y = ninf, col = "Model-based Vaccination")) +
+  labs(title = "Step 7: Model-based vs Random Vaccination",
+       x = "Time", y = "New infections", col = "Strategy")
+```
+
+The plot shows that the model-based vaccination strategy reaches an earlier and more pronounced peak in new infections compared to a random vaccination approach. This outcome occurs because the predictive model successfully identifies and isolates the network's vital hubs and super-spreaders.By taking out these key connecting people, the remaining random spreaders are trapped inside their own small, tight-knit circles of friends. Because of this, the virus quickly infects almost everyone within those isolated groups. This causes a fast initial spike in cases but it is blocked from traveling further and spreading to the rest of the network.
+
+##### 17. Measure differences (same metrics as Step 3)
+
+```{r}
+# a) Difference in total infected
+total_random_s5 <- sum(realization_random_s5$ninf)
+total_model_s5  <- sum(realization_model_s5$ninf)
+total_random_s5 - total_model_s5  # positive = model vaccination reduced more infections
+```
+
+```{r}
+# b) Difference in time of peak infection
+peak_random_s5 <- realization_random_s5$t[which.max(realization_random_s5$ninf)]
+peak_model_s5  <- realization_model_s5$t[which.max(realization_model_s5$ninf)]
+peak_model_s5 - peak_random_s5  # positive = model vaccination delayed the peak
+```
+The model-based vaccination strategy successfully protected the network, leading to 29 fewer total infections compared to a completely random vaccination approach. Additionally, the model-based approach caused the infection curve to peak 11 time steps earlier.
 
 ## References 
 
